@@ -1,0 +1,633 @@
+---
+title: "Sled Dog"
+author: "Dong Wang"
+date: "2023-03-09"
+output: html_document
+---
+
+
+LOAD DATA
+```{r}
+library(nlme)
+library(car)  
+library(ggplot2)
+library(ggsignif)
+library(dplyr)
+library(hrbrthemes)
+```
+
+```{r}
+# meta <- read.csv("metadata.csv", row.names=1)
+meta <- read.csv("metadata_22dogs.csv", row.names=1)
+shannon <- read.delim("shannon.tsv", row.names=1)
+faith <- read.delim("faith.tsv", row.names=1)
+```
+
+```{r}
+metrics <- cbind(shannon,faith)
+df <- merge(meta,metrics,by="row.names",all.x=TRUE)
+df <- data.frame(df, row.names = 1)
+```
+
+```{r}
+df.pre <- df[df$Exercise==0,]
+df.post <- df[df$Exercise==1,]
+df.Gyes <- df[df$Glucosamine=="yes",]
+df.Gno <- df[df$Glucosamine=="no",]
+```
+
+
+
+
+
+
+
+
+
+ALPHA DIVERSITY REGRESSIONS
+```{r}
+# no interaction terms, because not enough replication for repeated measure
+shannon <- lme(shannon_entropy ~ Glucosamine+Age+Sex+Breed+Diet+Injuries+Exercise, random=~1+Exercise|source, data=df)
+# summary(shannon)
+# anova(shannon)
+Anova(shannon, type="III")
+```
+
+```{r}
+faith <- lme(faith_pd ~ Glucosamine+Age+Sex+Breed+Diet+Injuries+Exercise, random=~1+Exercise|source, data=df)
+# summary(faith)
+# anova(faith)
+Anova(faith, type="III")
+```
+
+
+```{r}
+shannon.pre <- lm(shannon_entropy ~ Glucosamine+Age+Sex+Breed+Diet+Injuries, data=df.pre)
+# summary(shannon.pre)
+# anova(shannon.pre)
+Anova(shannon.pre, type="III")
+faith.pre <- lm(faith_pd ~ Glucosamine+Age+Sex+Breed+Diet+Injuries, data=df.pre)
+# summary(faith.pre)
+# anova(faith.pre)
+Anova(faith.pre, type="III")
+```
+
+```{r}
+shannon.post <- lm(shannon_entropy ~ Glucosamine+Age+Sex+Breed+Diet+Injuries, data=df.post)
+# anova(shannon.post)
+Anova(shannon.post, type="III")
+faith.post <- lm(faith_pd ~ Glucosamine+Age+Sex+Breed+Diet+Injuries, data=df.post)
+# anova(faith.post)
+Anova(faith.post, type="III")
+```
+
+```{r}
+# no breed or injuries, because only one dog
+shannon.yes <- lme(shannon_entropy ~ Exercise+Age+Sex+Diet, random=~1+Exercise|source, data=df.Gyes)
+# anova(shannon.yes)
+Anova(shannon.yes, type="III")
+faith.yes <- lme(faith_pd ~ Exercise+Age+Sex+Diet, random=~1+Exercise|source, data=df.Gyes)
+# anova(faith.yes)
+Anova(faith.yes, type="III")
+```
+
+```{r}
+# no diet, because diets are all same
+shannon.no <- lme(shannon_entropy ~ Exercise+Age+Sex+Breed+Injuries, random=~1+Exercise|source, data=df.Gno)
+# anova(shannon.no)
+Anova(shannon.no, type="III")
+faith.no <- lme(faith_pd ~ Exercise+Age+Sex+Breed+Injuries, random=~1+Exercise|source, data=df.Gno)
+# anova(faith.no)
+Anova(faith.no, type="III")
+```
+
+
+
+
+
+
+
+
+
+
+PAIRWISE BETA DIVERSITY
+```{r}
+pairs <- read.delim("pairs.tsv", row.names = 1)
+df.beta <- merge(meta,pairs,by="row.names",all.x=TRUE)
+df.beta <- data.frame(df.beta, row.names = 1)
+df.beta <- na.omit(df.beta)
+```
+
+```{r} 
+distance.yes <- df.beta$Distance[df.beta$Group=="yes"]
+distance.no <- df.beta$Distance[df.beta$Group=="no"]
+wilcox.test(distance.yes,distance.no)
+```
+
+```{r}
+self.pair <- ggplot(df.beta, aes(x=Group, y=Distance, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.7) +
+    scale_x_discrete(labels=c("No", "Yes")) +
+    xlab("Glucosamine") +
+    ylab("Bray-Curtis Distance") +
+    scale_y_continuous(breaks=c(0.2,0.5,0.8),
+                       labels=c("0.2","0.5","0.8"),
+                       limits=c(0.2,0.8)) 
+
+ggsave("figures/Boxplots/self-distance.jpg", self.pair, device="jpeg", dpi=300)
+```
+
+
+```{r}
+pre.pairs <- read.delim("pre_exercise_pairs_bray_curtis_remove.tsv")
+pre.pairs$Group <- paste(pre.pairs$Group1, '-', pre.pairs$Group2)
+pre.pairs <- pre.pairs[c(6,7)]
+pre.pairs <- subset(pre.pairs, Group!='no - yes')
+kruskal.test(Distance ~ Group, data = pre.pairs)
+pairwise.wilcox.test(pre.pairs$Distance, pre.pairs$Group,
+                 p.adjust.method = "BH")
+```
+
+```{r}
+pre.pairs$Group <- factor(pre.pairs$Group, levels=c("no - no", "yes - yes", "yes - no"))
+
+pre.pairs.plot <- ggplot(pre.pairs, aes(x=Group, y=Distance, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(comparisons = list(c("no - no", "yes - no"), c("yes - yes", "yes - no")), y_position = c(0.95,0.9),
+                annotations = c("*","*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("NG-NG", "YG-YG", "NG-YG")) +
+    xlab("Glucosamine") +
+    ylab("Bray-Curtis Distance") +
+    scale_y_continuous(breaks=c(0.2,0.5,0.8),
+                       labels=c("0.2","0.5","0.8"),
+                       limits=c(0.2,1))
+    
+ggsave("figures-remove/Boxplots/pre-pairwise.jpg", pre.pairs.plot, device="jpeg", dpi=300)
+```
+
+
+```{r}
+post.pairs <- read.delim("post_exercise_pairs_bray_curtis_remove.tsv")
+post.pairs$Group <- paste(post.pairs$Group1, '-', post.pairs$Group2)
+post.pairs <- post.pairs[c(6,7)]
+post.pairs <- subset(post.pairs, Group!='no - yes')
+kruskal.test(Distance ~ Group, data = post.pairs)
+pairwise.wilcox.test(post.pairs$Distance, post.pairs$Group,
+                 p.adjust.method = "BH")
+```
+
+```{r}
+post.pairs$Group <- factor(post.pairs$Group, levels=c("no - no", "yes - yes", "yes - no"))
+
+post.pairs.plot <- ggplot(post.pairs, aes(x=Group, y=Distance, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(comparisons = list(c("no - no", "yes - no")), y_position = c(0.85),
+                annotations = c("*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("NG-NG", "YG-YG", "NG-YG")) +
+    xlab("Glucosamine") +
+    ylab("Bray-Curtis Distance") +
+    scale_y_continuous(breaks=c(0.2,0.5,0.8),
+                       labels=c("0.2","0.5","0.8"),
+                       limits=c(0.2,0.9))
+
+ggsave("figures-remove/Boxplots/post-pairwise.jpg", post.pairs.plot, device="jpeg", dpi=300)
+```
+
+```{r}
+# pre.pairs$Subgroup <- "pre"
+# post.pairs$Subgroup <- "post"
+# exercise.pairs <- rbind(pre.pairs, post.pairs)
+# exercise.pairs$Subgroup <- factor(exercise.pairs$Subgroup, levels=c("pre","post"))
+# ```
+# 
+# ```{r}
+# exercise.pairs.plot <- ggplot(data=exercise.pairs, aes(x=Subgroup, y=Distance, fill=Group))+
+#   stat_boxplot(geom = "errorbar", width = 0.3) +  
+#   geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+#   theme_bw() +
+#   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+#   theme(axis.line = element_line(colour = "black")) +
+#   theme(legend.position="none", text = element_text(size = 25), axis.text.x = element_text(size=30)) +
+#   scale_fill_grey(start=1, end=0.4) +
+#   scale_x_discrete(labels=c("Pre", "Post")) +
+#   xlab("Exercise") +
+#   ylab("Bray-Curtis Distance") +
+#   scale_y_continuous(breaks=c(0.2,0.5,0.8),
+#                      labels=c("0.2","0.5","0.8"),
+#                      limits=c(0.2,0.8))
+# 
+# ggsave("figures/Boxplots/exercise-pairwise.jpg", exercise.pairs.plot, device="jpeg", dpi=300)
+```
+
+
+
+
+```{r}
+yes.pairs <- read.delim("yes_glucosamine_pairs_bray_curtis_remove.tsv")
+yes.pairs$Group <- paste(yes.pairs$Group1, '-', yes.pairs$Group2)
+yes.pairs <- yes.pairs[c(6,7)]
+yes.pairs <- subset(yes.pairs, Group!='post - pre')
+kruskal.test(Distance ~ Group, data = yes.pairs)
+pairwise.wilcox.test(yes.pairs$Distance, yes.pairs$Group,
+                 p.adjust.method = "BH")
+```
+
+```{r}
+yes.pairs$Group <- factor(yes.pairs$Group, levels=c("pre - pre", "post - post", "pre - post"))
+
+yes.pairs.plot <- ggplot(yes.pairs, aes(x=Group, y=Distance, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    # geom_signif(comparisons = list(c("pre - pre", "post - post"), c("pre - pre", "pre - post")), y_position = c(0.85,0.9),
+    #             annotations = c("*","*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("Pre-Pre", "Post-Post", "Pre-Post")) +
+    xlab("Exercise") +
+    ylab("Bray-Curtis Distance") +
+    scale_y_continuous(breaks=c(0.2,0.5,0.8),
+                       labels=c("0.2","0.5","0.8"),
+                       limits=c(0.2,0.9))
+
+ggsave("figures-remove/Boxplots/yes-pairwise.jpg", yes.pairs.plot, device="jpeg", dpi=300)
+```
+
+```{r}
+no.pairs <- read.delim("no_glucosamine_pairs_bray_curtis_remove.tsv")
+no.pairs$Group <- paste(no.pairs$Group1, '-', no.pairs$Group2)
+no.pairs <- no.pairs[c(6,7)]
+no.pairs <- subset(no.pairs, Group!='post - pre')
+kruskal.test(Distance ~ Group, data = no.pairs)
+pairwise.wilcox.test(no.pairs$Distance, no.pairs$Group,
+                 p.adjust.method = "BH")
+```
+
+```{r}
+no.pairs$Group <- factor(no.pairs$Group, levels=c("pre - pre", "post - post", "pre - post"))
+
+no.pairs.plot <- ggplot(no.pairs, aes(x=Group, y=Distance, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("Pre-Pre", "Post-Post", "Pre-Post")) +
+    xlab("Exercise") +
+    ylab("Bray-Curtis Distance") +
+    scale_y_continuous(breaks=c(0.2,0.5,0.8),
+                       labels=c("0.2","0.5","0.8"),
+                       limits=c(0.2,0.8))
+
+ggsave("figures-remove/Boxplots/no-pairwise.jpg", no.pairs.plot, device="jpeg", dpi=300)
+```
+
+```{r}
+# no.pairs$Subgroup <- "no"
+# yes.pairs$Subgroup <- "yes"
+# glucosamine.pairs <- rbind(no.pairs, yes.pairs)
+# glucosamine.pairs$Subgroup <- factor(glucosamine.pairs$Subgroup, levels=c("no","yes"))
+# ```
+# 
+# ```{r}
+# glucosamine.pairs.plot <- ggplot(data=glucosamine.pairs, aes(x=Subgroup, y=Distance, fill=Group))+
+#   geom_boxplot() +
+#   theme_bw() +
+#   theme(legend.position="none", text = element_text(size = 20)) +
+#   scale_fill_manual(values = c("no - no" = "seagreen",
+#                               "yes - yes" = "blue",
+#                               "yes - no" = "red")) +
+#   scale_x_discrete(labels=c("No", "Yes")) +
+#   xlab("Glucosamine") +
+#   scale_y_continuous(breaks=c(0.2,0.5,0.8),
+#                      labels=c("0.2","0.5","0.8"))
+# 
+# ggsave("figures/Boxplots/glucosamine-pairwise.jpg", exercise.pairs.plot, device="jpeg", dpi=300)
+```
+
+
+
+
+
+
+
+
+
+
+TAXA BAR PLOT
+```{r}
+family.table <- read.csv("family-relative-table.csv", row.names=1)
+lacto <- family.table[,"d__Bacteria.p__Firmicutes.c__Bacilli.o__Lactobacillales.f__Lactobacillaceae", drop=FALSE]
+meta.cat <- meta[,c("Glucosamine","ExerciseCat")]
+df.lacto <- merge(meta.cat,lacto,by="row.names",all.x=TRUE)
+df.lacto <- data.frame(df.lacto, row.names = 1)
+names(df.lacto)[names(df.lacto) == "d__Bacteria.p__Firmicutes.c__Bacilli.o__Lactobacillales.f__Lactobacillaceae"] <- 'Taxon'
+df.lacto$Group <- paste(df.lacto$Glucosamine, "-", df.lacto$ExerciseCat)
+df.lacto <- df.lacto[c(3,4)]
+df.lacto$Group <- factor(df.lacto$Group, levels=c("no - pre","yes - pre", "no - post", "yes - post"))
+```
+
+```{r}
+kruskal.test(Taxon ~ Group, data = df.lacto)
+pairwise.wilcox.test(df.lacto$Taxon, df.lacto$Group,
+                 p.adjust.method = "BH")
+```
+
+
+# ```{r}
+# df.lacto.stats <- df.lacto %>% 
+#   group_by(Group) %>%
+#   summarize(
+#     mean=mean(Taxon, na.rm=T),
+#     sd=sd(Taxon, na.rm=T),
+#     se=sd/sqrt(n()),
+#     median=median(Taxon, na.rm=T),
+#     IQR=IQR(Taxon, na.rm=T)
+#   )
+# ```
+
+```{r}
+lacto.plot <- ggplot(df.lacto, aes(x=Group, y=Taxon, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(xmin=c(1,2.1), xmax=c(1.9,3), y_position=c(0.45,0.45),
+                annotations = c("*","*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("PreNo","PreYes","PostNo","PostYes")) +
+    scale_y_continuous(breaks=c(0,0.25,0.5),
+                       labels=c("0","0.25","0.5"),
+                       limits=c(0,0.5)) +
+    xlab("Subgroup") +
+    ylab(expression(paste(italic("Lactobacillaceae"), " RA")))
+
+ggsave("figures-remove/TaxaAbundancePlots/lacto.jpg", lacto.plot, device="jpeg", dpi=300, width = 8.5)
+```
+
+d__Bacteria;p__Firmicutes;c__Clostridia;o__Peptostreptococcales-Tissierellales;f__Anaerovoracaceae
+
+```{r}
+anaero <- family.table[,"d__Bacteria.p__Firmicutes.c__Clostridia.o__Peptostreptococcales.Tissierellales.f__Anaerovoracaceae", drop=FALSE]
+df.anaero <- merge(meta.cat,anaero,by="row.names",all.x=TRUE)
+df.anaero <- data.frame(df.anaero, row.names = 1)
+names(df.anaero)[names(df.anaero) == "d__Bacteria.p__Firmicutes.c__Clostridia.o__Peptostreptococcales.Tissierellales.f__Anaerovoracaceae"] <- 'Taxon'
+df.anaero$Group <- paste(df.anaero$Glucosamine, "-", df.anaero$ExerciseCat)
+df.anaero <- df.anaero[c(3,4)]
+df.anaero$Group <- factor(df.anaero$Group, levels=c("no - pre","yes - pre", "no - post", "yes - post"))
+```
+
+```{r}
+kruskal.test(Taxon ~ Group, data = df.anaero)
+pairwise.wilcox.test(df.anaero$Taxon, df.anaero$Group,
+                 p.adjust.method = "BH")
+```
+
+
+# ```{r}
+# df.anaero.stats <- df.anaero %>% 
+#   group_by(Group) %>%
+#   summarize(
+#     mean=mean(Taxon, na.rm=T),
+#     sd=sd(Taxon, na.rm=T),
+#     se=sd/sqrt(n()),
+#     median=median(Taxon, na.rm=T),
+#     IQR=IQR(Taxon, na.rm=T)
+#   )
+# ```
+
+```{r}
+anaero.plot <- ggplot(df.anaero, aes(x=Group, y=Taxon, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(comparisons = list(c("no - pre", "yes - post"), c("no - post", "yes - post")), y_position = c(0.0185,0.0165),
+                annotations = c("*","*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("PreNo","PreYes","PostNo","PostYes")) +
+    scale_y_continuous(breaks=c(0,0.01,0.02),
+                       labels=c("0","0.01","0.02"),
+                       limits=c(0,0.02)) +
+    xlab("Subgroup") +
+    ylab(expression(paste(italic("Anaerovoracaceae"), " RA")))
+
+ggsave("figures-remove/TaxaAbundancePlots/anaero.jpg", anaero.plot, device="jpeg", dpi=300, width=8.5)
+```
+
+
+
+
+
+```{r}
+genus.table <- read.csv("genus-relative-table.csv", row.names=1)
+brachy <- genus.table[,"d__Bacteria.p__Firmicutes.c__Clostridia.o__Peptostreptococcales.Tissierellales.f__Anaerovoracaceae.g__.Eubacterium._brachy_group", drop=FALSE]
+meta.cat <- meta[,c("Glucosamine","ExerciseCat")]
+df.brachy <- merge(meta.cat,brachy,by="row.names",all.x=TRUE)
+df.brachy <- data.frame(df.brachy, row.names = 1)
+names(df.brachy)[names(df.brachy) == "d__Bacteria.p__Firmicutes.c__Clostridia.o__Peptostreptococcales.Tissierellales.f__Anaerovoracaceae.g__.Eubacterium._brachy_group"] <- 'Taxon'
+df.brachy$Group <- paste(df.brachy$Glucosamine, "-", df.brachy$ExerciseCat)
+df.brachy <- df.brachy[c(3,4)]
+df.brachy$Group <- factor(df.brachy$Group, levels=c("no - pre","yes - pre", "no - post", "yes - post"))
+
+kruskal.test(Taxon ~ Group, data = df.brachy)
+pairwise.wilcox.test(df.brachy$Taxon, df.brachy$Group,
+                 p.adjust.method = "BH")
+
+brachy.plot <- ggplot(df.brachy, aes(x=Group, y=Taxon, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(comparisons = list(c("no - pre", "yes - post"), c("no - post", "yes - post")), y_position = c(0.015,0.013),
+                annotations = c("†","†"), map_signif_level = TRUE, textsize=10, vjust=-0.1) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("PreNo","PreYes","PostNo","PostYes")) +
+    scale_y_continuous(breaks=c(0,0.008,0.016),
+                       labels=c("0","0.008","0.016"),
+                       limits=c(0,0.016)) +
+    xlab("Subgroup") +
+    ylab(expression(paste(italic("Eubacterium Brachy"), " Group RA")))
+
+ggsave("figures-remove/TaxaAbundancePlots/brachy.jpg", brachy.plot, device="jpeg", dpi=300, width=8.5)
+```
+
+```{r}
+sellimonas <- genus.table[,"d__Bacteria.p__Firmicutes.c__Clostridia.o__Lachnospirales.f__Lachnospiraceae.g__Sellimonas", drop=FALSE]
+meta.cat <- meta[,c("Glucosamine","ExerciseCat")]
+df.sellimonas <- merge(meta.cat,sellimonas,by="row.names",all.x=TRUE)
+df.sellimonas <- data.frame(df.sellimonas, row.names = 1)
+names(df.sellimonas)[names(df.sellimonas) == "d__Bacteria.p__Firmicutes.c__Clostridia.o__Lachnospirales.f__Lachnospiraceae.g__Sellimonas"] <- 'Taxon'
+df.sellimonas$Group <- paste(df.sellimonas$Glucosamine, "-", df.sellimonas$ExerciseCat)
+df.sellimonas <- df.sellimonas[c(3,4)]
+df.sellimonas$Group <- factor(df.sellimonas$Group, levels=c("no - pre","yes - pre", "no - post", "yes - post"))
+
+kruskal.test(Taxon ~ Group, data = df.sellimonas)
+pairwise.wilcox.test(df.sellimonas$Taxon, df.sellimonas$Group,
+                 p.adjust.method = "BH")
+
+sellimonas.plot <- ggplot(df.sellimonas, aes(x=Group, y=Taxon, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(comparisons = list(c("no - pre", "yes - post"), c("no - post", "yes - post")), y_position = c(0.009,0.008),
+                annotations = c("†","†"), map_signif_level = TRUE, textsize=10, vjust=-0.1) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("PreNo","PreYes","PostNo","PostYes")) +
+    scale_y_continuous(breaks=c(0,0.005,0.01),
+                       labels=c("0","0.005","0.01"),
+                       limits=c(0,0.01)) +
+    xlab("Subgroup") +
+    ylab(expression(paste(italic("Sellimonas"), " RA")))
+
+ggsave("figures-remove/TaxaAbundancePlots/sellimonas.jpg", sellimonas.plot, device="jpeg", dpi=300, width=8.5)
+```
+
+```{r}
+parvibacter <- genus.table[,"d__Bacteria.p__Actinobacteriota.c__Coriobacteriia.o__Coriobacteriales.f__Eggerthellaceae.g__Parvibacter", drop=FALSE]
+meta.cat <- meta[,c("Glucosamine","ExerciseCat")]
+df.parvibacter <- merge(meta.cat,parvibacter,by="row.names",all.x=TRUE)
+df.parvibacter <- data.frame(df.parvibacter, row.names = 1)
+names(df.parvibacter)[names(df.parvibacter) == "d__Bacteria.p__Actinobacteriota.c__Coriobacteriia.o__Coriobacteriales.f__Eggerthellaceae.g__Parvibacter"] <- 'Taxon'
+df.parvibacter$Group <- paste(df.parvibacter$Glucosamine, "-", df.parvibacter$ExerciseCat)
+df.parvibacter <- df.parvibacter[c(3,4)]
+df.parvibacter$Group <- factor(df.parvibacter$Group, levels=c("no - pre","yes - pre", "no - post", "yes - post"))
+
+kruskal.test(Taxon ~ Group, data = df.parvibacter)
+pairwise.wilcox.test(df.parvibacter$Taxon, df.parvibacter$Group,
+                 p.adjust.method = "BH")
+
+parvibacter.plot <- ggplot(df.parvibacter, aes(x=Group, y=Taxon, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    # geom_signif(comparisons = list(c("no - post", "yes - post")), y_position = c(0.0009),
+    #             annotations = c("*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("PreNo","PreYes","PostNo","PostYes")) +
+    scale_y_continuous(breaks=c(0,0.0005,0.001),
+                       labels=c("0","0.0005","0.001"),
+                       limits=c(0,0.001)) +
+    xlab("Subgroup") +
+    ylab(expression(paste(italic("Parvibacter"), " RA")))
+
+ggsave("figures-remove/TaxaAbundancePlots/parvibacter.jpg", parvibacter.plot, device="jpeg", dpi=300, width=8.5)
+```
+
+```{r}
+uncultured <- genus.table[,"d__Bacteria.p__Actinobacteriota.c__Coriobacteriia.o__Coriobacteriales.f__Eggerthellaceae.g__uncultured", drop=FALSE]
+meta.cat <- meta[,c("Glucosamine","ExerciseCat")]
+df.uncultured <- merge(meta.cat,uncultured,by="row.names",all.x=TRUE)
+df.uncultured <- data.frame(df.uncultured, row.names = 1)
+names(df.uncultured)[names(df.uncultured) == "d__Bacteria.p__Actinobacteriota.c__Coriobacteriia.o__Coriobacteriales.f__Eggerthellaceae.g__uncultured"] <- 'Taxon'
+df.uncultured$Group <- paste(df.uncultured$Glucosamine, "-", df.uncultured$ExerciseCat)
+df.uncultured <- df.uncultured[c(3,4)]
+df.uncultured$Group <- factor(df.uncultured$Group, levels=c("no - pre","yes - pre", "no - post", "yes - post"))
+
+kruskal.test(Taxon ~ Group, data = df.uncultured)
+pairwise.wilcox.test(df.uncultured$Taxon, df.uncultured$Group,
+                 p.adjust.method = "BH")
+
+uncultured.plot <- ggplot(df.uncultured, aes(x=Group, y=Taxon, fill=Group)) + 
+    stat_boxplot(geom = "errorbar", width = 0.2) +  
+    geom_boxplot(outlier.shape = 1, outlier.size = 5, outlier.stroke = 1) +
+    geom_signif(comparisons = list(c("no - pre", "yes - post"), c("no - post", "yes - post")), y_position = c(0.00053,0.00045),
+                annotations = c("*","*"), map_signif_level = TRUE, textsize=13, vjust=0.5) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) +
+    theme(axis.line = element_line(colour = "black")) +
+    theme(legend.position="none", text = element_text(size = 30, family="arial"), axis.text = element_text(size=30), axis.title.y = element_text(size=28)) +
+    scale_fill_grey(start=1, end=0.5) +
+    scale_x_discrete(labels=c("PreNo","PreYes","PostNo","PostYes")) +
+    scale_y_continuous(breaks=c(0,0.0003,0.0006),
+                       labels=c("0","0.0003","0.0006"),
+                       limits=c(0,0.0006)) +
+    xlab("Subgroup") +
+    ylab(expression(paste(italic("(Eggerthellaceae) Uncultured"), " RA")))
+
+ggsave("figures-remove/TaxaAbundancePlots/uncultured.jpg", uncultured.plot, device="jpeg", dpi=300, width=8.5)
+```
+
+
+
+
+
+
+TAXA BAR PLOT
+```{r}
+load("phyloseq.RData")
+```
+
+```{r}
+pseq = transform_sample_counts(ps, function(x){x / sum(x)})
+
+plot_composition(pseq,
+                      taxonomic.level = "Family",
+                      sample.sort = "Glucosamine",
+                      x.label = "source") +
+  scale_fill_brewer("Genera", palette = "Paired") +
+  guides(fill = guide_legend(ncol = 1)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Samples", y = "Relative abundance (%)",
+       title = "Relative abundance data") + 
+  theme_modern_rc(grid="Y") +
+  theme(axis.text.x = element_text(angle=90, hjust=1),
+        legend.text = element_text(face = "italic")) +
+  theme_bw() +
+  theme(legend.position="none")
+```
+
+```{r}
+plot_composition(pseq,
+                             sample.sort = "Glucosamine",
+                             otu.sort = NULL,
+                             x.label = "Sample",
+                             plot.type = "barplot",
+                             verbose = FALSE) +
+  theme_minimal() +
+  guides(fill = guide_legend(ncol = 1)) +
+  labs(x = "Samples",
+       y = "Relative abundance") +
+  scale_fill_brewer("Family", palette = "Paired") +
+  
+  #Removes sample names and ticks
+  theme(axis.text.x=element_blank(), 
+        axis.ticks.x=element_blank()) +
+  #Adjusts size of subtitle, caption, legend text and legend title
+  theme(legend.position="none")
+```
+
